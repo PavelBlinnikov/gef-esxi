@@ -131,7 +131,15 @@ class ESXi(GenericCommand):
             if self.find_base() == False:
                 return
 
-        print(gdb.execute(f"add-symbol-file {path} {hex(self.vmk_base)}", to_string=True))
+        vmk_sections = self.get_sections(path)
+
+        gdb_command = f"add-symbol-file {path} "
+        for sect in vmk_sections:
+            if vmk_sections[sect].lma == 0:
+                continue
+            gdb_command += f"-s {sect} {vmk_sections[sect].lma} "
+
+        gdb.execute(gdb_command)
         self.vmk_path = path
 
         gdb.execute("context")
