@@ -128,8 +128,13 @@ class ESXi(GenericCommand):
 
     def load_vmk_file(self, path):
         if self.vmk_base == 0:
-            if self.find_base() == False:
+            base = self.find_base()
+            if base == False or base is None:
                 return
+
+        if not os.path.exists(path):
+            self.quiet_err(f"{path} doesn't exist")
+            return
 
         vmk_sections = self.get_sections(path)
 
@@ -145,6 +150,9 @@ class ESXi(GenericCommand):
         gdb.execute("context")
 
     def load_vmx_file(self, path):
+        if not os.path.exists(path):
+            self.quiet_err(f"{path} doesn't exist")
+            return
         data = subprocess.check_output(["objdump", "-h", path]).decode("utf-8")
         if 'vmmblob' in data:
             self.quiet_info("vmx path successfully set")
@@ -296,6 +304,7 @@ class ESXi(GenericCommand):
         self.LoadSecondary("Monitor_Init", self)
 
     @parse_args
+    @only_if_gdb_running
     def do_invoke(self, args):
         match args.func:
             case "regs":
