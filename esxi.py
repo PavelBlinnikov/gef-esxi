@@ -142,7 +142,8 @@ class ESXi(GenericCommand):
         for sect in vmk_sections:
             if vmk_sections[sect].lma == 0:
                 continue
-            gdb_command += f"-s {sect} {vmk_sections[sect].lma} "
+            offset = vmk_sections[sect].lma - vmk_sections[".text"].lma
+            gdb_command += f"-s {sect} {self.vmk_base + offset} "
 
         gdb.execute(gdb_command)
         self.vmk_path = path

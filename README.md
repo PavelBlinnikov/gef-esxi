@@ -1,6 +1,6 @@
 # gef-esxi
 
-This is the GDB extension that enables comfortable ESXi debugging. It is based on [bata24-gef](https://github.com/bata24/gef). 
+This is the GDB extension that enables comfortable ESXi debugging. It is based on [bata24-gef](https://github.com/bata24/gef). Note that all the featured commands can work with KASLR enabled.
 
 ## Installation
 
