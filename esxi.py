@@ -1,84 +1,6 @@
 from gef import *
-
-vmx_exit_reason = {
-  0x00000000: "EXCEPTION_OR_NMI",
-  0x00000001: "EXTERNAL_INTERRUPT",
-  0x00000002: "TRIPLE_FAULT",
-  0x00000003: "INIT_SIGNAL",
-  0x00000004: "STARTUP_IPI",
-  0x00000005: "IO_SMI",
-  0x00000006: "SMI",
-  0x00000007: "INTERRUPT_WINDOW",
-  0x00000008: "NMI_WINDOW",
-  0x00000009: "TASK_SWITCH",
-  0x0000000A: "EXECUTE_CPUID",
-  0x0000000B: "EXECUTE_GETSEC",
-  0x0000000C: "EXECUTE_HLT",
-  0x0000000D: "EXECUTE_INVD",
-  0x0000000E: "EXECUTE_INVLPG",
-  0x0000000F: "EXECUTE_RDPMC",
-  0x00000010: "EXECUTE_RDTSC",
-  0x00000011: "EXECUTE_RSM_IN_SMM",
-  0x00000012: "EXECUTE_VMCALL",
-  0x00000013: "EXECUTE_VMCLEAR",
-  0x00000014: "EXECUTE_VMLAUNCH",
-  0x00000015: "EXECUTE_VMPTRLD",
-  0x00000016: "EXECUTE_VMPTRST",
-  0x00000017: "EXECUTE_VMREAD",
-  0x00000018: "EXECUTE_VMRESUME",
-  0x00000019: "EXECUTE_VMWRITE",
-  0x0000001A: "EXECUTE_VMXOFF",
-  0x0000001B: "EXECUTE_VMXON",
-  0x0000001C: "MOV_CR",
-  0x0000001D: "MOV_DR",
-  0x0000001E: "EXECUTE_IO_INSTRUCTION",
-  0x0000001F: "EXECUTE_RDMSR",
-  0x00000020: "EXECUTE_WRMSR",
-  0x00000021: "ERROR_INVALID_GUEST_STATE",
-  0x00000022: "ERROR_MSR_LOAD",
-  0x00000024: "EXECUTE_MWAIT",
-  0x00000025: "MONITOR_TRAP_FLAG",
-  0x00000027: "EXECUTE_MONITOR",
-  0x00000028: "EXECUTE_PAUSE",
-  0x00000029: "ERROR_MACHINE_CHECK",
-  0x0000002B: "TPR_BELOW_THRESHOLD",
-  0x0000002C: "APIC_ACCESS",
-  0x0000002D: "VIRTUALIZED_EOI",
-  0x0000002E: "GDTR_IDTR_ACCESS",
-  0x0000002F: "LDTR_TR_ACCESS",
-  0x00000030: "EPT_VIOLATION",
-  0x00000031: "EPT_MISCONFIGURATION",
-  0x00000032: "EXECUTE_INVEPT",
-  0x00000033: "EXECUTE_RDTSCP",
-  0x00000034: "VMX_PREEMPTION_TIMER_EXPIRED",
-  0x00000035: "EXECUTE_INVVPID",
-  0x00000036: "EXECUTE_WBINVD",
-  0x00000037: "EXECUTE_XSETBV",
-  0x00000038: "APIC_WRITE",
-  0x00000039: "EXECUTE_RDRAND",
-  0x0000003A: "EXECUTE_INVPCID",
-  0x0000003B: "EXECUTE_VMFUNC",
-  0x0000003C: "EXECUTE_ENCLS",
-  0x0000003D: "EXECUTE_RDSEED",
-  0x0000003E: "PAGE_MODIFICATION_LOG_FULL",
-  0x0000003F: "EXECUTE_XSAVES",
-  0x00000040: "EXECUTE_XRSTORS",
-  0x00000041: "EXECUTE_PCONFIG",
-  0x00000042: "SPP_RELATED_EVENT",
-  0x00000043: "EXECUTE_UMWAIT",
-  0x00000044: "EXECUTE_TPAUSE",
-  0x00000045: "EXECUTE_LOADIWKEY",
-  0x00000046: "EXECUTE_ENCLV",
-  0x00000048: "EXECUTE_ENQCMD",
-  0x00000049: "EXECUTE_ENQCMDS",
-  0x0000004A: "BUS_LOCK_ASSERTION",
-  0x0000004B: "INSTRUCTION_TIMEOUT",
-  0x0000004C: "EXECUTE_SEAMCALL",
-  0x0000004D: "EXECUTE_TDCALL",
-  0x0000004E: "EXECUTE_RDMSRLIST",
-  0x0000004F: "EXECUTE_WRMSRLIST",
-}
-
+import threading
+from vmx_constants import *
 
 @register_command
 class ESXi(GenericCommand):
@@ -107,6 +29,7 @@ class ESXi(GenericCommand):
     p_mods = subparsers.add_parser('mods', help='load vmm mods')
     
     p_vmexit = subparsers.add_parser('vmexit', help='trace vm-exits')
+    p_vmexit.add_argument('on_off', help='')
 
     _syntax_ = parser.format_help()
 
@@ -120,11 +43,17 @@ class ESXi(GenericCommand):
                              internal=True,
                              temporary=True)
             self.handler_function = function
-            self.silent = True
+
+        def _is_safe_event_thread(self):
+            try:
+                gdb.newest_frame()
+            except gdb.error as e:
+                if "Selected thread is running" in str(e) or 'Cannot execute this command while the target is running' in str(e):
+                    return False
+            return True
 
         def stop(self):
-            self.handler_function()
-            return False
+            return self.handler_function()
 
     class Section:
         size = 0
@@ -268,10 +197,29 @@ class ESXi(GenericCommand):
             self.quiet_err("vmmblob is not found in vmx")
 
     def vmexit_handler(self):
-        gef_print(f"VMCS_EXIT_REASON: {'VMX_EXIT_REASON'+vmx_exit_reason[get_register('$rdi')]}")
+        # just a lil hack for now, will replace with offset to .shared_per_vmx_vcpu later
+        vc_base = int(str(Disasm.gef_instruction_n(gdb.parse_and_eval("HVExitLowLevel"), 0)).split('#')[-1].strip(), 16) - 0x20
+        gef_print(f"__VC base is {hex(vc_base)}")
+        guest_rip = read_int64_from_memory(vc_base+0x18)
+        guest_rsp = read_int64_from_memory(vc_base+0x40)
 
-    def vmexit_setup(self):
-        self.SetFunctionOnBreak("HVExit", self.vmexit_handler)
+        vm_exit_reason = vmx_exit_reason[get_register('$rdi')]
+        gef_print(f"VMCS_EXIT_REASON: VMX_EXIT_REASON_{vm_exit_reason}")
+        gef_print(f"VMCS_GUEST_RIP: {hex(guest_rip)}")
+        gef_print(f"VMCS_GUEST_RSP: {hex(guest_rsp)}")
+
+    def vmexit_setup(self, on_off):
+        if not self.mods_resolved:
+            self.quiet_err("execute `esx vmx-file` and `esx mods` first")
+            return
+
+        if on_off == "on":
+            self.hvexit_bp = self.SetFunctionOnBreak("HVExit", self.vmexit_handler)
+        elif on_off == "off":
+            try:
+                self.hvexit_bp.enabled = False
+            except:
+                pass
 
     def get_sections(self, path):
         data = subprocess.check_output(["objdump", "-h", path]).decode('utf-8').split('\n')
@@ -411,6 +359,6 @@ class ESXi(GenericCommand):
             case "mods":
                 self.load_base_mods()
             case "vmexit":
-                self.vmexit_setup()
+                self.vmexit_setup(args.on_off)
         return
 
